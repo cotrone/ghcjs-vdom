@@ -4,13 +4,13 @@
 
   mostly experimental, might not stay
  -}
-module GHCJS.VDOM.QQ (ch, children, pr, props) where
+module GHCJS.VDOM.QQ (ch, children, att, attributes) where
 
 import           Language.Haskell.TH.Quote
 import           Language.Haskell.TH.Syntax
-import           Language.Haskell.TH
 
-import           GHCJS.VDOM.Internal
+import           GHCJS.VDOM.Internal.Types
+
 import           GHCJS.Types
 import           GHCJS.Marshal
 
@@ -23,8 +23,8 @@ import           Data.Typeable
 
 import           System.IO.Unsafe
 
-pr :: QuasiQuoter
-pr = props
+att :: QuasiQuoter
+att = attributes
 
 ch :: QuasiQuoter
 ch = children
@@ -32,13 +32,13 @@ ch = children
 -- example: [props|a:1, b: null, c: x, d: y |]
 -- every value is either a literal or a variable referring to a convertible Haskell name
 -- fixme, this does not have a proper parser
-props :: QuasiQuoter
-props = QuasiQuoter { quoteExp = quoteProps }
+attributes :: QuasiQuoter
+attributes = QuasiQuoter { quoteExp = quoteProps }
 
 quoteProps :: String -> Q Exp
 quoteProps pat = jsExpQQ ('{':ffiPat++"}") (map mkName names)
-                 (\x -> AppE (VarE 'castRef) (AppE (VarE 'unsafePerformIO) (AppE (VarE 'toJSRef) x)))
-                 (AppE (ConE 'Properties))
+                 (\x -> AppE (VarE 'unsafePerformIO) (AppE (VarE 'toJSVal) x))
+                 (AppE (ConE 'Attributes'))
   where
     (names, ffiPat) = genpat 1 $ map (break (==':') . trim) (linesBy (==',') pat)
     isName [] = False
@@ -60,7 +60,7 @@ children :: QuasiQuoter
 children = QuasiQuoter { quoteExp = quoteChildren }
 
 quoteChildren :: String -> Q Exp
-quoteChildren pat = jsExpQQ ffiPat names (AppE (VarE 'unVNode)) (AppE (ConE 'Children))
+quoteChildren pat = jsExpQQ ffiPat names (AppE (VarE 'unVNode)) (AppE (ConE 'Children'))
   where
     names  = map (mkName.trim) (linesBy (==',') pat)
     ffiPat = '[' : L.intercalate "," (map (('$':).show) (take (length names) [(1::Int)..])) ++ "]"
@@ -78,11 +78,10 @@ jsExpQQ pat args unwrap wrap = do
       ty :: Int -> Type
       ty 0         = ref
       ty n         = AppT (AppT ArrowT ref) (ty (n-1))
-      ref          = AppT (ConT ''JSRef) (ConT ''())
+      ref          = ConT ''JSVal
       ffiCall []     = (VarE n)
       ffiCall (y:ys) = AppE (ffiCall ys) (unwrap (VarE y))
       pat'           = "__ghcjs_javascript_" ++ L.intercalate "_" (map (show . ord) pat)
   qAddTopDecls [ffiDecl]
   qPutQ (QQCounter (c+1))
   return $ wrap (ffiCall $ reverse args)
-
